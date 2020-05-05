@@ -1,0 +1,358 @@
+---
+title: "Milestone Reports"
+author: "Heidi Peterson"
+date: "5/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+libraries
+```{r, echo=FALSE}
+library(rJava)
+library(NLP)
+library(openNLP)
+library(RWeka)
+# Increase memory as Building model with large dataset required high memory
+# Default memory is 512 MB so upgrading it io 2GB
+options( java.parameters = "-Xmx5g" )
+library(ggplot2)
+library(tm)
+library(qdap)
+library(dplyr)
+library(SnowballC)
+
+```
+
+## R Milestone NLP Capstone Project
+```{r setup, include=FALSE}
+library(utils)
+memory.limit()
+
+```
+
+Task 1: Getting and Cleaning the data
+
+```{r,echo=FALSE}
+#loading data
+blogs_file   <- "./en_US/en_US.blogs.txt"
+news_file    <- "./en_US/en_US.news.txt"
+twitter_file <- "./en_US/en_US.twitter.txt"  
+blogs_size   <- file.size(blogs_file) / 1024 / 1024
+news_size    <- file.size(news_file) / 1024 / 1024
+twitter_size <- file.size(twitter_file)/ 1024 / 1024
+con <- file(blogs_file, "r")
+blogs<- readLines(con, encoding = "UTF-8")
+close(con)
+con <- file(news_file, "rb")
+news<- readLines(con, encoding = "UTF-8", skipNul = TRUE)
+close(con)
+con <- file(twitter_file, "r")
+twitter<- readLines(con, encoding = "UTF-8", skipNul = TRUE)
+close(con)
+
+```
+
+
+## basic summaries of the three files? Word counts, line counts and basic data tables
+word count
+```{r, echo=FALSE}
+library(ngram)
+
+blogs_words <- wordcount(blogs, sep = " ")
+news_words  <- wordcount(news,  sep = " ")
+twitter_words <- wordcount(twitter, sep = " ")
+
+```
+
+line counts
+```{r, echo=FALSE}
+blogs_lines   <- length(blogs)
+news_lines    <- length(news)
+twitter_lines <- length(twitter)
+total_lines   <- blogs_lines + news_lines + twitter_lines
+```
+
+Basic data Tables
+```{r, echo=FALSE}
+data.frame("File Name" = c("blogs", "news", "twitter"),
+           "size"=c(blogs_size,news_size,twitter_size),
+           "num.lines" = c(blogs_lines,news_lines, twitter_lines),
+           "num.words" = c(blogs_words, news_words, twitter_words))
+```
+
+he sample size is going to be 10% of the total size.  To save time. And because my Ram cannot handle the file
+#data sample
+```{r, echo=FALSE}
+set.seed(123)
+sample <- c(sample(blogs, blogs_lines*0.1, replace = TRUE),
+            sample(news, news_lines*0.1, replace = TRUE),
+            sample(twitter, twitter_lines*0.1, replace = TRUE))
+
+rm(blogs)
+rm(news)
+rm(twitter)
+gc()
+
+
+```
+
+##Clean and save Sample
+
+```{r, echo=FALSE}
+
+
+
+sample<-tolower(sample)
+sample<-removePunctuation(sample)
+sample<-removeNumbers(sample)
+sample<-stripWhitespace(sample)
+sample<-bracketX(sample)
+sample<-replace_number(sample)
+sample<-replace_abbreviation(sample)
+sample<-replace_contraction(sample)
+sample<-replace_symbol(sample)
+```
+Save sample file
+```{r, echo=FALSE}
+
+save(sample, file = "sample.RData")
+write.csv(sample, file = "sample.csv")
+writeLines(sample, "sample.txt")
+rm(sample)
+gc()
+```
+
+##Make Corpus
+```{r, echo=FALSE}
+
+CorpusData = readLines("sample.txt")
+corpus <- VCorpus(VectorSource(CorpusData))
+
+```
+#data clean - profanity and stopwords ..  
+```{r , echo=FALSE}
+
+
+profanity<-read.table("profanity.txt", header=FALSE, sep="\n", strip.white=TRUE)
+corpus<- tm_map(corpus, removeWords, profanity[,1])
+
+#corpus <- tm_map(corpus, removeWords, stopwords("english"))
+```
+
+save corpus
+
+```{r , echo=FALSE}
+save(corpus, file = "corpus.RData")
+write.csv(corpus, file = "corpus.csv")
+
+```
+
+##Tokenization
+Build basic n-gram model - using the exploratory analysis you performed, build a basic n-gram model for predicting the next word based on the previous 1, 2, or 3 words.
+NGram Tokenizers - break the corpus into either a unigram, bigram, or trigram Term Document Matrix
+
+```{r, echo=FALSE}
+
+buildNgramModel <- function(N){
+
+  # Build N gram model
+  return(function(x) NGramTokenizer(x, Weka_control(min = N, max = N, delimiters = " \\r\\n\\t.,;:\"()?!")))
+  #return(function(x) ngramrr(x,ngmin = N,ngmax = N))
+
+}
+```
+# Generate term document frequency table from corpus
+
+```{R, echo = FALSE}
+
+
+generateTDM <- function(data,N,isTrace = F){
+
+  if(isTrace){
+    startTime = Sys.time()
+    print(paste0("Build started: ",N,"-gram model"," @ ",startTime))
+  }
+
+  tdm = TermDocumentMatrix(data,control = list(tokenize = buildNgramModel(N)))
+
+  tdm.df = data.frame(word=tdm$dimnames[[1]],freq=rowSums(as.matrix(tdm)),row.names = NULL)
+
+  tdm.df = tdm.df[order(-tdm.df$freq),]
+
+  #tdm <- textcnt(data, n = N, method = "string", recursive = TRUE)
+  #tdm.df <- data.frame(word = names(tdm), freq = unclass(tdm),row.names = NULL)
+
+  #tdm.df <- tdm.df[tdm.df$char.length > 2,]
+
+  #tdm.df <- tdm.df[order(-tdm.df$freq),]
+
+  if(isTrace){
+    print(paste0("Time to build ",N,"-gram model"," :- ", Sys.time() - startTime))
+  }
+
+  return(tdm.df)
+}
+```
+
+```{r , echo =FALSE }
+
+
+  unigram.df = generateTDM(corpus,1,T)
+ # saveRDS(unigram.df,file = "output/unigram.RDS")
+
+  # Bigram model
+  bigram.df = generateTDM(corpus,2,T)
+  #saveRDS(bigram.df,file = "output/bigram.RDS")
+  
+  # Trigram model
+  trigram.df = generateTDM(corpus,3,T)
+ #saveRDS(trigram.df,file = "output/trigram.RDS")
+  
+  # Quadrigram model
+  quadragram.df = generateTDM(corpus,4,T)
+  #saveRDS(quadragram.df,file = "output/quadrigram.RDS")
+  
+  # Fivegram model
+  fivegram.df = generateTDM(corpus,5,T)
+  #saveRDS(fivegram.df,file = "output/fivegram.RDS")
+```
+
+```{r , echo =FALSE }
+head(bigram.df)
+
+```
+  
+```{r, echo=FALSE}
+#This function predicts next word based on previous N number of words using N-gram models generated by
+ predict_Backoff <- function(testline,modelsList,isDebugMode = F){
+
+  # Max number of ngrams supported
+  maxNGramIndex = length(modelsList)
+
+  # Clean the test string
+  line = iconv(testline,"latin1","ASCII",sub="")
+  line = line %>% replace_abbreviation %>% replace_contraction %>% removeNumbers %>%  removePunctuation %>% tolower  %>% stripWhitespace
+
+  if(isDebugMode)
+    print(line)
+
+  # Tokenize the test string
+  words <- unlist(strsplit(line, split=" "));
+  len <- length(words);
+
+  if(isDebugMode)
+    print(paste("Length of the string is: ",len))
+
+  # If test string is lower than the max number of ngrams then we do not need to go through all the ngram model
+  # Instead we will look into N-gram models having N less than the length of test string
+  if(len < maxNGramIndex){
+    nGramIndex = len + 1
+
+    localModelsList = modelsList[(maxNGramIndex-len):maxNGramIndex]
+
+  }else{
+    nGramIndex = maxNGramIndex
+    localModelsList = modelsList
+  }
+
+  if(isDebugMode)
+    print(paste("Number of models will be used: ",length(localModelsList)))
+  index = 0
+  predictions = NULL
+  for(model in localModelsList){
+
+    # +2 offest to match number of words with nGram model
+    #if(nGramIndex != maxNGramIndex)
+    pattern = paste0("^",paste(words[(len - nGramIndex + 2):len],collapse = " "))
+
+    if(isDebugMode)
+      print(pattern)
+
+    # Find the pattern in the respective n-gram model
+    nextWords = model[grep(pattern,model$word)[1:3],1]
+    nextWords = nextWords[!is.na(nextWords)]
+    # if(length(nextWords) != 0){
+    #   nextWordIndex = sample(1:length(nextWords),3)
+    #   nextWord = nextWords[nextWordIndex]
+    # }else{
+    #   nextWord = NA
+    # }
+
+
+    # Print top 5 match
+    if(isDebugMode)
+      print(nextWords)
+
+    if(isDebugMode)
+      print(paste("Predicated word: ",nextWords))
+
+    nGramIndex = nGramIndex - 1
+
+    # If the next word is predicted then return the answer
+    # Else backoff to check the word with n-1 gram models
+    # if(!is.na(nextWord)){
+    #
+    #   # The returned word will have have queried word as it was used to match
+    #   # Just remove the queried word from the predicted word for better user experience
+    #   tempNextWord = unlist(strsplit(as.character(nextWord)," "))
+    #
+    #   if(isDebugMode)
+    #     print(paste("Splitted text: ",tempNextWord))
+    #
+    #   nextWord = paste(tempNextWord[length(tempNextWord)])
+    #
+    #   break
+    # }
+
+    if(length(nextWords) != 0){
+      print(nextWords)
+      for(word in nextWords){
+        index = index + 1
+        tempWord = unlist(strsplit(as.character(word)," "))
+        if(sum(predictions == tempWord[length(tempWord)])>0)
+          {
+          next
+        }
+
+        predictions  = c(predictions, tempWord[length(tempWord)])
+        if(length(predictions) == 3){
+          break
+        }
+      }
+      if(length(predictions) == 3){
+        break
+      }
+
+    }
+
+  }
+
+  #print(predictions)
+
+  if(length(predictions) < 3){
+    if(isDebugMode)
+      print(paste("No match found in ",paste(1:maxNGramIndex,collapse = ","),"Gram models so returning the most frequent word"))
+      predictions = c(predictions,modelsList[[maxNGramIndex]][1:(3-length(predictions)),1])
+  }
+
+  if(isDebugMode)
+    print(paste("The next predicated word using",nGramIndex+1,"gram model:-", nextWords))
+  return(predictions)
+
+ }
+```
+ 
+```{r, echo =FALSE}
+ quadragram.df <- quadragram.df %>% filter(freq > 1)
+fivegram.df <- fivegram.df %>% filter(freq > 1)
+
+# List of all the models
+modelsList = list(fivegram.df,quadragram.df,trigram.df,bigram.df,unigram.df)
+```
+
+```{r, echo =FALSE}
+predict_Backoff("You're the reason why I smile everyday. Can you follow me please? It would mean the",modelsList)
+```
