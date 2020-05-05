@@ -1,0 +1,275 @@
+---
+title: "Milestone Report"
+author: "Heidi Peterson"
+date: "4/29/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Task 1: Getting and Cleaning the data
+
+```{r,echo=FALSE}
+#loading data
+blogs_file   <- "./en_US/en_US.blogs.txt"
+news_file    <- "./en_US/en_US.news.txt"
+twitter_file <- "./en_US/en_US.twitter.txt"  
+blogs_size   <- file.size(blogs_file) / 1024 / 1024
+news_size    <- file.size(news_file) / 1024 / 1024
+twitter_size <- file.size(twitter_file) / 1024 / 1024
+con <- file(blogs_file, "r")
+blogs<- readLines(con, encoding = "UTF-8")
+close(con)
+con <- file(news_file, "rb")
+news<- readLines(con, encoding = "UTF-8", skipNul = TRUE)
+close(con)
+con <- file(twitter_file, "r")
+twitter<- readLines(con, encoding = "UTF-8", skipNul = TRUE)
+close(con)
+
+```
+
+
+## basic summaries of the three files? Word counts, line counts and basic data tables
+word count
+```{r, echo=FALSE}
+library(ngram)
+
+blogs_words <- wordcount(blogs, sep = " ")
+news_words  <- wordcount(news,  sep = " ")
+twitter_words <- wordcount(twitter, sep = " ")
+
+```
+
+line counts
+```{r, echo=FALSE}
+blogs_lines   <- length(blogs)
+news_lines    <- length(news)
+twitter_lines <- length(twitter)
+total_lines   <- blogs_lines + news_lines + twitter_lines
+```
+
+Basic data Tables
+```{r, echo=FALSE}
+data.frame("File Name" = c("blogs", "news", "twitter"),
+           "size"=c(blogs_size,news_size,twitter_size),
+           "num.lines" = c(blogs_lines,news_lines, twitter_lines),
+           "num.words" = c(blogs_words, news_words, twitter_words))
+```
+##  basic plots, such as histograms to illustrate features of the data
+The sample size is going to be .1% of the total size.  To save time. And because my Ram cannot handle the file
+#data sample
+```{r, echo=FALSE}
+set.seed(123)
+sample <- c(sample(blogs, blogs_lines*0.001, replace = TRUE),
+            sample(news, news_lines*0.001, replace = TRUE),
+            sample(twitter, twitter_lines*0.001, replace = TRUE))
+
+rm(blogs)
+rm(news)
+rm(twitter)
+gc()
+
+```
+##Clean Sample
+
+```{r, echo=FALSE}
+
+library(tm)
+library(qdap)
+
+sample<-tolower(sample)
+sample<-removePunctuation(sample)
+sample<-removeNumbers(sample)
+sample<-stripWhitespace(sample)
+sample<-bracketX(sample)
+sample<-replace_number(sample)
+sample<-replace_abbreviation(sample)
+sample<-replace_contraction(sample)
+sample<-replace_symbol(sample)
+```
+Save sample file
+```{r, echo=FALSE}
+
+save(sample, file = "sample.RData")
+write.csv(sample, file = "sample.csv")
+writeLines(sample, "sample.txt")
+#gc()
+```
+
+
+```{r, echo=FALSE}
+#make corpus
+ #stall.packages("rJava")
+library(rJava)
+#istall.packages(c("NLP", "openNLP", "RWeka", "qdap"))
+library(NLP)
+library(openNLP)
+library(RWeka)
+
+```
+##Make Corpus
+```{r, echo=FALSE}
+#getwd()
+#data <- read.csv(file="sample.csv",head=FALSE,sep=",")
+corpus <- VCorpus(VectorSource(sample))
+rm(sample)
+gc()
+```
+#data clean - profanity and stopwords ..  
+```{r , echo=FALSE}
+library(SnowballC)
+
+profanity<-read.table("profanity.txt", header=FALSE, sep="\n", strip.white=TRUE)
+corpus<- tm_map(corpus, removeWords, profanity[,1])
+
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+
+
+```
+
+#Task 2: Exploratory Data Analysis
+
+
+
+Exploratory analysis - perform a thorough exploratory analysis of the data, understanding the distribution of words and relationship between the words in the corpora.
+##Tokenization
+Build basic n-gram model - using the exploratory analysis you performed, build a basic n-gram model for predicting the next word based on the previous 1, 2, or 3 words.
+NGram Tokenizers - break the corpus into either a unigram, bigram, or trigram Term Document Matrix
+```{r, echo=FALSE}
+#Tokenizer functions
+UnigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 1, max = 1))
+BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+TrigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+
+
+```
+
+
+Now we create the document-term matrix.
+
+Understand frequencies of words and word pairs - build figures and tables to understand variation in the frequencies of words and word pairs in the data.
+```{r, echo=FALSE}
+
+
+writeLines(as.character(corpus), con="mycorpus.txt")
+
+rm(profanity)
+
+gc()
+```
+Some words are more frequent than others - what are the distributions of word frequencies?
+What are the frequencies of 2-grams and 3-grams in the dataset?
+```{r, echo=FALSE}
+tdm1 <- TermDocumentMatrix(corpus, control = list(tokenize = UnigramTokenizer))
+dtm1<-as.matrix(tdm1)
+rm(tdm1)
+gc()
+frequency1 <- rowSums(dtm1)
+rm(dtm1)
+gc()
+frequency1<- sort(frequency1, decreasing=TRUE)
+
+
+```
+
+```{r, echo=FALSE}
+
+plot(sort(frequency1, decreasing = T),col="blue",main="Word TF-IDF frequencies", xlab="TF-IDF-based rank", ylab = "TF-IDF")
+```
+
+```{r, echo=FALSE}
+library(ggplot2)
+high.freq=tail(sort(frequency1),n=10)
+hfp.df=as.data.frame(sort(high.freq))
+hfp.df$names <- rownames(hfp.df) 
+
+ggplot(hfp.df, aes(reorder(names,high.freq), high.freq) ) +
+  geom_bar(stat="identity",  color="blue") + coord_flip() + 
+  xlab("Terms") + ylab("Frequency") +
+  ggtitle("Term frequencies")
+```
+
+
+
+
+2-grams
+```{r, echo=FALSE}
+
+tdm2<- TermDocumentMatrix(corpus, control = list(tokenize = BigramTokenizer))
+dtm2<-as.matrix(tdm2)
+frequency2 <- rowSums(dtm2)
+frequency2<- sort(frequency2, decreasing=TRUE)
+
+rm(tdm2)
+rm(dtm2)
+gc()
+head(frequency2)
+```
+
+3-grams
+```{r, echo=FALSE}
+
+tdm3<- TermDocumentMatrix(corpus, control=list(tokenize=TrigramTokenizer))
+dtm3<-as.matrix(tdm3)
+frequency3 <- rowSums(dtm3)
+frequency3<- sort(frequency3, decreasing=TRUE)
+rm(tdm3)
+rm(dtm3)
+gc()
+head(frequency3)
+
+
+```
+
+How many unique words do you need in a frequency sorted dictionary to cover 50% of all word instances in the language? 90%?
+```{r, echo=FALSE}
+p<-cumsum(frequency1)/sum(frequency1)
+which(p>=0.5)[1]
+```
+
+```{r, echo=FALSE}
+p<-cumsum(frequency1)/sum(frequency1)
+which(p>=0.9)[1]
+```
+How do you evaluate how many of the words come from foreign languages?
+use tm to remove words as part of the english dictionary and subtract the difference.
+
+Can you think of a way to increase the coverage -- identifying words that may not be in the corpora or using a smaller number of words in the dictionary to cover the same number of phrases?
+
+use a synonym dictionary and replace the synonyms with the most frequently used one.
+
+
+Plot: Word Cloud 1-gram
+```{r , echo=FALSE}
+#nstall.packages('wordcloud')
+library(wordcloud)
+words <- names(frequency1)
+wordcloud(words[1:50], frequency1[1:100],colors=brewer.pal(8,"Paired"))
+
+```
+Plot: Word Cloud 2-gram
+```{r , echo=FALSE}
+
+words <- names(frequency2)
+wordcloud(words[1:20], frequency2[1:50],colors=brewer.pal(8,"Accent"))
+
+```
+Plot: Word Cloud 3-gram
+```{r}
+
+words <- names(frequency3)
+wordcloud(words[1:100], frequency3[1:100],colors=brewer.pal(8,"Dark2"))
+
+```
+#Task 3: Modeling
+
+Ngram Analysis
+Build a model to handle unseen n-grams - in some cases people will want to type a combination of words that does not appear in the corpora. Build a model to handle cases where a particular n-gram isn't observed.
+
+I did not build a backoff models   which is a model which i will look at all previous words in an ngram to predict the next one on conditional probability.   I had to work for days dealing with RAM issues and intend to transfer my work to a server.   
+```{r pressure, echo=FALSE}
+
+```
+##  report written in a brief, concise style, in a way that a non-data scientist manager could appreciate
